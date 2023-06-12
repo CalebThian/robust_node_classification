@@ -139,7 +139,7 @@ class GATConv(nn.Module):
                  negative_slope=0.2,
                  residual=False,
                  activation=None,
-                 allow_zero_in_degree=False,
+                 allow_zero_in_degree=True,
                  bias=True,
                  norm=None,
                  concat_out=True):
@@ -181,7 +181,7 @@ class GATConv(nn.Module):
         self.norm = norm
         if norm is not None:
             self.norm = create_norm(norm)(num_heads * out_feats)
-        self.set_allow_zero_in_degree(False)
+        self.set_allow_zero_in_degree(allow_zero_in_degree)
 
     def reset_parameters(self):
         """

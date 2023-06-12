@@ -138,7 +138,7 @@ def build_args():
     
     # Attack
     parser.add_argument('--attack', type=str, default='random',
-                    choices=['meta', 'random', 'nettack'])
+                    choices=['meta', 'random', 'nettack','none'])
     parser.add_argument("--label_rate", type=float, default=0.01, 
                         help='rate of labeled data')
     parser.add_argument('--ptb_rate', type=float, default=0.15, 
