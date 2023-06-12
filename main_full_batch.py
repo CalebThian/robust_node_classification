@@ -10,6 +10,7 @@ from utils import (
     TBLogger,
     get_current_lr,
     load_best_configs,
+    noisify_with_P
 )
 
 from datasets.data_proc import load_small_dataset
@@ -93,7 +94,15 @@ def main(args):
         for u,v in zip(edge_index[0],edge_index[1]):
             graph.add_edges(u,v)
     
-
+    if args.noise in ['uniform', 'pair']:
+        #%% add noise to the labels
+        ptb = args.ptb_rate
+        train_labels = graph.ndata['label'][graph.ndata['train_mask']].numpy()
+        noise_y, P = noisify_with_P(train_labels,num_classes, ptb, 10, args.noise) 
+        #noise_labels = graph.ndata['labels']
+        #noise_labels[graph.ndata['train_mask']] = noise_y
+        graph.ndata['label'][graph.ndata['train_mask']] = torch.tensor(noise_y)
+        
     acc_list = []
     estp_acc_list = []
     for i, seed in enumerate(seeds):

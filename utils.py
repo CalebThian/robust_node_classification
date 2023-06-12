@@ -19,6 +19,7 @@ import dgl.function as fn
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
+from numpy.testing import assert_array_almost_equal
 
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -143,6 +144,11 @@ def build_args():
                         help='rate of labeled data')
     parser.add_argument('--ptb_rate', type=float, default=0.15, 
                         help="noise ptb_rate")
+    
+    # Perturb Nodes
+    parser.add_argument('--noise', type=str, default='pair',
+                        choices=['uniform','pair','none'], help='type of noises')
+
     args = parser.parse_args()
     return args
     
