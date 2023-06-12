@@ -228,6 +228,10 @@ class PreModel(nn.Module):
         return criterion
 
     def forward(self, g, x, targets=None, epoch=0, drop_g1=None, drop_g2=None):        # ---- attribute reconstruction ----
+                # Link Predictor
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.estimator = EstimateAdj(edge_index, features, args, device=self.device).to(self.device)
+        
         loss = self.mask_attr_prediction(g, x, targets, epoch, drop_g1, drop_g2)
 
         return loss
@@ -365,3 +369,90 @@ class PreModel(nn.Module):
     def fixed_remask(self, g, rep, masked_nodes):
         rep[masked_nodes] = 0
         return rep
+    
+class EstimateAdj(nn.Module):
+    """Provide a pytorch parameter matrix for estimated
+    adjacency matrix and corresponding operations.
+    """
+
+    def __init__(self, edge_index, features, args ,device='cuda'):
+        super(EstimateAdj, self).__init__()
+
+        
+        if args.estimator=='MLP':
+            self.estimator = nn.Sequential(nn.Linear(features.shape[1],args.mlp_hidden),
+                                    nn.ReLU(),
+                                    nn.Linear(args.mlp_hidden,args.mlp_hidden))
+        else:
+            self.estimator = GCN(features.shape[1], args.mlp_hidden, args.mlp_hidden,dropout=0.0,device=device)
+        self.device = device
+        self.args = args
+        self.poten_edge_index = self.get_poten_edge(edge_index,features,args.n_p)
+        self.features_diff = torch.cdist(features,features,2)
+        self.estimated_weights = None
+
+
+    def get_poten_edge(self, edge_index, features, n_p):
+
+        if n_p == 0:
+            return edge_index
+
+        poten_edges = []
+        for i in range(len(features)):
+            sim = torch.div(torch.matmul(features[i],features.T), features[i].norm()*features.norm(dim=1))
+            _,indices = sim.topk(n_p)
+            poten_edges.append([i,i])
+            indices = set(indices.cpu().numpy())
+            indices.update(edge_index[1,edge_index[0]==i])
+            for j in indices:
+                if j > i:
+                    pair = [i,j]
+                    poten_edges.append(pair)
+        poten_edges = torch.as_tensor(poten_edges).T
+        poten_edges = utils.to_undirected(poten_edges,len(features)).to(self.device)
+
+        return poten_edges
+    
+
+    def forward(self, edge_index, features):
+
+        if self.args.estimator=='MLP':
+            representations = self.estimator(features)
+        else:
+            representations = self.estimator(features,edge_index,\
+                                            torch.ones([edge_index.shape[1]]).to(self.device).float())
+        rec_loss = self.reconstruct_loss(edge_index, representations)
+
+        x0 = representations[self.poten_edge_index[0]]
+        x1 = representations[self.poten_edge_index[1]]
+        output = torch.sum(torch.mul(x0,x1),dim=1)
+
+        self.estimated_weights = F.relu(output)
+        self.estimated_weights[self.estimated_weights < self.args.t_small] = 0.0
+        
+
+        return rec_loss
+    
+    def reconstruct_loss(self, edge_index, representations):
+        
+        num_nodes = representations.shape[0]
+        randn = utils.negative_sampling(edge_index,num_nodes=num_nodes, num_neg_samples=self.args.n_n*num_nodes)
+        randn = randn[:,randn[0]<randn[1]]
+
+        edge_index = edge_index[:, edge_index[0]<edge_index[1]]
+        neg0 = representations[randn[0]]
+        neg1 = representations[randn[1]]
+        neg = torch.sum(torch.mul(neg0,neg1),dim=1)
+
+        pos0 = representations[edge_index[0]]
+        pos1 = representations[edge_index[1]]
+        pos = torch.sum(torch.mul(pos0,pos1),dim=1)
+
+        neg_loss = torch.exp(torch.pow(self.features_diff[randn[0],randn[1]]/self.args.sigma,2)) @ F.mse_loss(neg,torch.zeros_like(neg), reduction='none')
+        pos_loss = torch.exp(-torch.pow(self.features_diff[edge_index[0],edge_index[1]]/self.args.sigma,2)) @ F.mse_loss(pos, torch.ones_like(pos), reduction='none')
+
+        rec_loss = (pos_loss + neg_loss) \
+                    * num_nodes/(randn.shape[1] + edge_index.shape[1]) 
+        
+
+        return rec_loss
