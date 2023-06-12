@@ -11,12 +11,14 @@ from utils import (
     get_current_lr,
     load_best_configs,
 )
+
 from datasets.data_proc import load_small_dataset
 from models.finetune import linear_probing_full_batch
 from models import build_model
 
 from dataset import Dataset, get_PtbAdj
-
+from dgl import remove_edges, add_edges
+import torch_geometric.utils as utils
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 
@@ -84,12 +86,12 @@ def main(args):
             name=args.dataset,
             attack_method=args.attack,
             ptb_rate=args.ptb_rate)
-        
-        adj = graph.adj(transpose=True).indices()
-        for i in adj:
-            graph = dgl.remove_edges(graph, i)
-        for e,w in perturbed_adj:
-            graph = dgl.add_edges(graph,e[0],e[1],weight = w)
+
+        graph.remove_edges(np.arange(0,graph.num_edges()))
+        edge_index, _ = utils.from_scipy_sparse_matrix(perturbed_adj)
+
+        for u,v in zip(edge_index[0],edge_index[1]):
+            graph.add_edges(u,v)
     
 
     acc_list = []
