@@ -37,10 +37,10 @@ def accuracy(y_pred, y_true):
     float
         accuracy
     """
-    if not hasattr(labels, '__len__'):
-        labels = [labels]
-    if type(labels) is not torch.Tensor:
-        labels = torch.LongTensor(labels)
+    if not hasattr(y_true, '__len__'):
+        y_true = [y_true]
+    if type(y_true) is not torch.Tensor:
+        y_true = torch.LongTensor(y_true)
     y_true = y_true.squeeze().long()
     preds = y_pred.max(1)[1].type_as(y_true)
     correct = preds.eq(y_true).double()
