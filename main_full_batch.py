@@ -15,6 +15,8 @@ from datasets.data_proc import load_small_dataset
 from models.finetune import linear_probing_full_batch
 from models import build_model
 
+from dataset import Dataset, get_PtbAdj
+
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 
@@ -76,6 +78,19 @@ def main(args):
 
     graph, (num_features, num_classes) = load_small_dataset(dataset_name)
     args.num_features = num_features
+    
+    if args.attack in ['meta','nettack','random']:
+        perturbed_adj = get_PtbAdj(root="./data/{}".format(args.label_rate),
+            name=args.dataset,
+            attack_method=args.attack,
+            ptb_rate=args.ptb_rate)
+        
+        adj = graph.adj(transpose=True).indices()
+        for i in adj:
+            graph = dgl.remove_edges(graph, i)
+        for e,w in perturbed_adj:
+            graph = dgl.add_edges(graph,e[0],e[1],weight = w)
+    
 
     acc_list = []
     estp_acc_list = []
@@ -100,6 +115,7 @@ def main(args):
             scheduler = None
             
         x = graph.ndata["feat"]
+        
         if not load_model:
             model = pretrain(model, graph, x, optimizer, max_epoch, device, scheduler, num_classes, lr_f, weight_decay_f, max_epoch_f, linear_prob, logger)
             model = model.cpu()

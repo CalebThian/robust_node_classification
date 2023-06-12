@@ -126,7 +126,7 @@ def build_args():
     parser.add_argument("--batch_size_f", type=int, default=128)
     parser.add_argument("--sampling_method", type=str, default="saint", help="sampling method, `lc` or `saint`")
 
-    parser.add_argument("--label_rate", type=float, default=1.0)
+    #parser.add_argument("--label_rate", type=float, default=1.0)
     parser.add_argument("--ego_graph_file_path", type=str, default=None)
     parser.add_argument("--data_dir", type=str, default="data")
 
@@ -135,7 +135,14 @@ def build_args():
     parser.add_argument("--delayed_ema_epoch", type=int, default=0)
     parser.add_argument("--replace_rate", type=float, default=0.0)
     parser.add_argument("--momentum", type=float, default=0.996)
-
+    
+    # Attack
+    parser.add_argument('--attack', type=str, default='random',
+                    choices=['meta', 'random', 'nettack'])
+    parser.add_argument("--label_rate", type=float, default=0.01, 
+                        help='rate of labeled data')
+    parser.add_argument('--ptb_rate', type=float, default=0.15, 
+                        help="noise ptb_rate")
     args = parser.parse_args()
     return args
     
