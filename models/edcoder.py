@@ -245,8 +245,6 @@ class PreModel(nn.Module):
         return criterion
 
     def forward(self, g, x, targets=None, epoch=0, drop_g1=None, drop_g2=None):        # ---- attribute reconstruction ----
-                # Link Predictor
-        
         loss = self.mask_attr_prediction(g, x, targets, epoch, drop_g1, drop_g2)
 
         return loss
@@ -256,7 +254,12 @@ class PreModel(nn.Module):
         use_g = drop_g1 if drop_g1 is not None else g
 
         enc_rep = self.encoder(use_g, use_x,)
-        # Embeddings 
+        # Embeddings
+        # ---- Begin: Link Prediction ----
+        for i in range(int(args.outer_steps)):
+                self.train_adj(epoch, enc_rep, edge_index, labels,
+                        idx_train, idx_val)
+        # ---- End: Link Prediction ----
         with torch.no_grad():
             drop_g2 = drop_g2 if drop_g2 is not None else g
             latent_target = self.encoder_ema(drop_g2, x,)
@@ -303,6 +306,65 @@ class PreModel(nn.Module):
             self.ema_update()
         return loss
 
+    # ---- Begin: Edge Predictor Training ----
+    def train_adj(self, epoch, features, edge_index, labels, idx_train, idx_val):
+        args = self.args
+        if args.debug:
+            print("\n=== train_adj ===")
+        t = time.time()
+
+        self.optimizer_adj.zero_grad()
+
+        rec_loss = self.estimator(edge_index,features)
+
+        output = self.model(features, self.estimator.poten_edge_index, self.estimator.estimated_weights)
+        loss_gcn = F.cross_entropy(output[idx_train], labels[idx_train])
+        acc_train = accuracy(output[idx_train], labels[idx_train])
+
+        loss_label_smooth = self.label_smoothing(self.estimator.poten_edge_index,\
+                                                 self.estimator.estimated_weights.detach(),\
+                                                 output, idx_train, self.args.threshold)
+
+
+        total_loss = loss_gcn + args.alpha *rec_loss
+
+
+        total_loss.backward()
+
+        self.optimizer_adj.step()
+
+
+        # Evaluate validation set performance separately,
+        # deactivates dropout during validation run.
+        self.model.eval()
+        output = self.model(features, self.estimator.poten_edge_index, self.estimator.estimated_weights.detach())
+
+        loss_val = F.cross_entropy(output[idx_val], labels[idx_val])
+        acc_val = accuracy(output[idx_val], labels[idx_val])
+        
+
+        if acc_val > self.best_val_acc:
+            self.best_val_acc = acc_val
+            self.best_graph = self.estimator.estimated_weights.detach()
+            self.weights = deepcopy(self.model.state_dict())
+            if args.debug:
+                print('\t=== saving current graph/gcn, best_val_acc: %s' % self.best_val_acc.item())
+
+
+        if args.debug:
+            if epoch % 1 == 0:
+                print('Epoch: {:04d}'.format(epoch+1),
+                      'loss_gcn: {:.4f}'.format(loss_gcn.item()),
+                      'rec_loss: {:.4f}'.format(rec_loss.item()),
+                      'loss_label_smooth: {:.4f}'.format(loss_label_smooth.item()),
+                      'loss_total: {:.4f}'.format(total_loss.item()))
+                print('Epoch: {:04d}'.format(epoch+1),
+                        'acc_train: {:.4f}'.format(acc_train.item()),
+                        'loss_val: {:.4f}'.format(loss_val.item()),
+                        'acc_val: {:.4f}'.format(acc_val.item()),
+                        'time: {:.4f}s'.format(time.time() - t))
+     # ---- End: Edge Predictor Training ----
+    
     def ema_update(self):
         def update(student, teacher):
             with torch.no_grad():
