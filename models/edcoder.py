@@ -241,7 +241,7 @@ class PreModel(nn.Module):
         use_g = drop_g1 if drop_g1 is not None else g
 
         enc_rep = self.encoder(use_g, use_x,)
-
+        # Here is the Embeddings 
         with torch.no_grad():
             drop_g2 = drop_g2 if drop_g2 is not None else g
             latent_target = self.encoder_ema(drop_g2, x,)

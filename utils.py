@@ -148,6 +148,28 @@ def build_args():
     # Perturb Nodes
     parser.add_argument('--noise', type=str, default='pair',
                         choices=['uniform','pair','none'], help='type of noises')
+    
+    # Train edge predictor
+    parser.add_argument('--alpha', type=float, default=0.01, 
+                    help='weight of rec loss')
+    parser.add_argument('--sigma', type=float, default=100, 
+                        help='the parameter to control the variance of sample weights in rec loss')
+    parser.add_argument('--beta', type=float, default=0.3, help='weight of label smoothness loss')
+    parser.add_argument('--threshold', type=float, default=0.8, 
+                        help='threshold for adj of label smoothing')
+    parser.add_argument('--t_small',type=float, default=0.1,
+                        help='threshold of eliminating the edges')
+
+    parser.add_argument('--inner_steps', type=int, default=2, 
+                        help='steps for inner optimization')
+    parser.add_argument('--outer_steps', type=int, default=1, 
+                        help='steps for outer optimization')
+    parser.add_argument('--lr_adj', type=float, default=0.001, 
+                        help='lr for training adj')
+    parser.add_argument("--n_p", type=int, default=100, 
+                        help='number of positive pairs per node')
+    parser.add_argument("--n_n", type=int, default=50, 
+                        help='number of negitive pairs per node')
 
     args = parser.parse_args()
     return args
