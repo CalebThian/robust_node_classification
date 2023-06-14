@@ -33,6 +33,7 @@ def build_model(args):
     zero_init = args.dataset in ("cora", "pubmed", "citeseer")
 
     model = PreModel(
+        args,
         in_dim=num_features,
         num_hidden=num_hidden,
         num_layers=num_layers,

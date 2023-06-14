@@ -47,6 +47,7 @@ def setup_module(m_type, enc_dec, in_dim, num_hidden, out_dim, num_layers, dropo
 class PreModel(nn.Module):
     def __init__(
             self,
+            args,
             in_dim: int,
             num_hidden: int,
             num_layers: int,
@@ -74,6 +75,8 @@ class PreModel(nn.Module):
             momentum: float = 0.996,
             replace_rate: float = 0.0,
             zero_init: bool = False,
+            # need to add graph information for edge predictor construction
+            arg
          ):
         super(PreModel, self).__init__()
         self._mask_rate = mask_rate
@@ -107,6 +110,13 @@ class PreModel(nn.Module):
         dec_in_dim = num_hidden
         dec_num_hidden = num_hidden // nhead if decoder_type in ("gat",) else num_hidden 
 
+        # edge predictor
+        self.args = args
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        
+        ## Stop here, here should consider whether need input or not?
+        self.estimator = EstimateAdj(edge_index, features, args, device=self.device).to(self.device)
+        
         # build encoder
         self.encoder = setup_module(
             m_type=encoder_type,
@@ -229,8 +239,6 @@ class PreModel(nn.Module):
 
     def forward(self, g, x, targets=None, epoch=0, drop_g1=None, drop_g2=None):        # ---- attribute reconstruction ----
                 # Link Predictor
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.estimator = EstimateAdj(edge_index, features, args, device=self.device).to(self.device)
         
         loss = self.mask_attr_prediction(g, x, targets, epoch, drop_g1, drop_g2)
 
@@ -241,7 +249,7 @@ class PreModel(nn.Module):
         use_g = drop_g1 if drop_g1 is not None else g
 
         enc_rep = self.encoder(use_g, use_x,)
-        # Here is the Embeddings 
+        # Embeddings 
         with torch.no_grad():
             drop_g2 = drop_g2 if drop_g2 is not None else g
             latent_target = self.encoder_ema(drop_g2, x,)

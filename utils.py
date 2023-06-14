@@ -150,6 +150,10 @@ def build_args():
                         choices=['uniform','pair','none'], help='type of noises')
     
     # Train edge predictor
+    parser.add_argument('--estimator', type=str, default='MLP',
+                    choices=['MLP','GCN'])
+    parser.add_argument('--mlp_hidden', type=int, default=64,
+                    help='Number of hidden units of MLP graph constructor')
     parser.add_argument('--alpha', type=float, default=0.01, 
                     help='weight of rec loss')
     parser.add_argument('--sigma', type=float, default=100, 
