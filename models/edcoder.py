@@ -113,9 +113,16 @@ class PreModel(nn.Module):
         # edge predictor
         self.args = args
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        if args.estimator=='MLP':
+            estimator = nn.Sequential(nn.Linear(enc_num_hidden,args.mlp_hidden),
+                                    nn.ReLU(),
+                                    nn.Linear(args.mlp_hidden,args.mlp_hidden))
+        else:
+            estimator = GCN(enc_num_hidden, args.mlp_hidden, args.mlp_hidden,dropout=0.0,device=device)
+        
         
         ## Stop here, here should consider whether need input or not?
-        self.estimator = EstimateAdj(edge_index, features, args, device=self.device).to(self.device)
+        self.estimator = EstimateAdj(estimator, args, device=self.device).to(self.device)
         
         # build encoder
         self.encoder = setup_module(
@@ -383,25 +390,24 @@ class EstimateAdj(nn.Module):
     adjacency matrix and corresponding operations.
     """
 
-    def __init__(self, edge_index, features, args ,device='cuda'):
+    def __init__(self, estimator, args ,device='cuda'):
         super(EstimateAdj, self).__init__()
 
-        
+        '''
         if args.estimator=='MLP':
             self.estimator = nn.Sequential(nn.Linear(features.shape[1],args.mlp_hidden),
                                     nn.ReLU(),
                                     nn.Linear(args.mlp_hidden,args.mlp_hidden))
         else:
             self.estimator = GCN(features.shape[1], args.mlp_hidden, args.mlp_hidden,dropout=0.0,device=device)
+        '''
+        self.estimator = estimator
         self.device = device
         self.args = args
-        self.poten_edge_index = self.get_poten_edge(edge_index,features,args.n_p)
-        self.features_diff = torch.cdist(features,features,2)
         self.estimated_weights = None
 
 
     def get_poten_edge(self, edge_index, features, n_p):
-
         if n_p == 0:
             return edge_index
 
@@ -423,7 +429,9 @@ class EstimateAdj(nn.Module):
     
 
     def forward(self, edge_index, features):
-
+        self.poten_edge_index = self.get_poten_edge(edge_index,features,args.n_p)
+        self.features_diff = torch.cdist(features,features,2)
+        
         if self.args.estimator=='MLP':
             representations = self.estimator(features)
         else:
