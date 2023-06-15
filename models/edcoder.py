@@ -284,7 +284,7 @@ class PreModel(nn.Module):
                 labels = graph.ndata['train_mask'].numpy()
                 idx_train = graph.ndata['train_mask'].numpy()
                 idx_val = graph.ndata['val_mask'].numpy()
-                self.train_adj(i, enc_rep, edge_index, labels, idx_train, idx_val) 
+                self.train_adj(i, enc_rep, edge_index, labels, idx_train, idx_val, g, keep_nodes) 
         # ---- End: Link Prediction ----
         
         with torch.no_grad():
@@ -394,7 +394,7 @@ class PreModel(nn.Module):
         self.test(idx_val)
         print("===================================")
     
-    def train_adj(self, epoch, features, edge_index, labels, idx_train, idx_val):
+    def train_adj(self, epoch, features, edge_index, labels, idx_train, idx_val, g, keep_nodes):
         args = self.args
         if args.debug:
             print("\n=== train_adj ===")
@@ -402,12 +402,23 @@ class PreModel(nn.Module):
 
         self.optimizer_adj.zero_grad()
 
-        rec_loss = self.estimator(edge_index,features)
+        rec_loss = self.estimator(edge_index, features)
 
-        output = self.model(features, self.estimator.poten_edge_index, self.estimator.estimated_weights)
-        loss_gcn = F.cross_entropy(output[idx_train], labels[idx_train])
-        acc_train = accuracy(output[idx_train], labels[idx_train])
-
+        #output = self.model(features, self.estimator.poten_edge_index, self.estimator.estimated_weights)
+        enc_rep = self.encoder(g, features,)
+        with torch.no_grad():
+            latent_target = self.encoder_ema(g, features,)
+            output = self.projector_ema(latent_target[keep_nodes])
+            
+            latent_pred = self.projector(enc_rep[keep_nodes])
+            latent_pred = self.predictor(latent_pred)
+            
+            loss_latent = sce_loss(latent_pred, latent_target, 1)
+            acc_train = accuracy(latent_pred, latent_target)
+            #loss_gcn = F.cross_entropy(output, labels[idx_train])
+            #acc_train = accuracy(output, labels[idx_train])
+        
+        ## Stop here
         loss_label_smooth = self.label_smoothing(self.estimator.poten_edge_index,\
                                                  self.estimator.estimated_weights.detach(),\
                                                  output, idx_train, self.args.threshold)
@@ -453,6 +464,29 @@ class PreModel(nn.Module):
                 
         if args.debug:
             print("\n=== end train_adj ===")
+            
+    def label_smoothing(self, edge_index, edge_weight, representations, idx_train, threshold):
+
+
+        num_nodes = representations.shape[0]
+        n_mask = torch.ones(num_nodes, dtype=torch.bool).to(self.device)
+        n_mask[idx_train] = 0
+
+        mask = n_mask[edge_index[0]] \
+                & (edge_index[0] < edge_index[1])\
+                & (edge_weight >= threshold)\
+                | torch.bitwise_not(n_mask)[edge_index[1]]
+
+        unlabeled_edge = edge_index[:,mask]
+        unlabeled_weight = edge_weight[mask]
+
+        Y = F.softmax(representations)
+
+        loss_smooth_label = unlabeled_weight\
+                            @ torch.pow(Y[unlabeled_edge[0]] - Y[unlabeled_edge[1]], 2).sum(dim=1)\
+                            / num_nodes
+
+        return loss_smooth_label
     # ---- End: Edge Predictor Training ----
     
     def ema_update(self):
