@@ -265,10 +265,15 @@ class PreModel(nn.Module):
                 ## features: enc_rep
                 ## edge_index: edge_index, _ = utils.from_scipy_sparse_matrix(adj)
                 ###            edge_index = edge_index.to(self.device)
-                
+                ## labels:  graph.ndata['label']
+                ## idx_train: graph.ndata['train_mask'].numpy()
+                ## idx_val: graph.ndata['val_mask'].numpy()
                 adj = utils.from_scipy_sparse_matrix(pre_use_g.adj(scipy_fmt='coo', etype='develops'))
                 edge_index, _ = utils.from_scipy_sparse_matrix(adj)
                 edge_index = edge_index.to(self.device)
+                labels = graph.ndata['train_mask'].numpy()
+                idx_train = graph.ndata['train_mask'].numpy()
+                idx_val = graph.ndata['val_mask'].numpy()
                 self.train_adj(i, enc_rep, edge_index, labels, idx_train, idx_val) 
         # ---- End: Link Prediction ----
         
