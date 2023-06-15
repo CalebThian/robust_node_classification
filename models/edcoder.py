@@ -9,6 +9,8 @@ from .gat import GAT
 
 from .loss_func import sce_loss
 
+import torch_geometric.utils as utils
+
 
 def setup_module(m_type, enc_dec, in_dim, num_hidden, out_dim, num_layers, dropout, activation, residual, norm, nhead, nhead_out, attn_drop, negative_slope=0.2, concat_out=True, **kwargs) -> nn.Module:
     if m_type in ("gat", "tsgat"):
@@ -258,8 +260,16 @@ class PreModel(nn.Module):
         # Embeddings
         # ---- Begin: Link Prediction ----
         for i in range(int(args.outer_steps)):
-                self.train_adj(epoch, enc_rep, edge_index, labels,
-                        idx_train, idx_val)
+                # train_adj(self, epoch, features, edge_index, labels, idx_train, idx_val)
+                ## epoch: i
+                ## features: enc_rep
+                ## edge_index: edge_index, _ = utils.from_scipy_sparse_matrix(adj)
+                ###            edge_index = edge_index.to(self.device)
+                
+                adj = utils.from_scipy_sparse_matrix(pre_use_g.adj(scipy_fmt='coo', etype='develops'))
+                edge_index, _ = utils.from_scipy_sparse_matrix(adj)
+                edge_index = edge_index.to(self.device)
+                self.train_adj(i, enc_rep, edge_index, labels, idx_train, idx_val) 
         # ---- End: Link Prediction ----
         
         with torch.no_grad():
