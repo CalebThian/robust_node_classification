@@ -1,7 +1,7 @@
 from .edcoder import PreModel
 
 
-def build_model(args):
+def build_model(args,graph,x):
     num_heads = args.num_heads
     num_out_heads = args.num_out_heads
     num_hidden = args.num_hidden
@@ -61,5 +61,7 @@ def build_model(args):
         remask_method=remask_method,
         momentum=momentum,
         zero_init=zero_init,
+        graph = graph,
+        x = x
     )
     return model

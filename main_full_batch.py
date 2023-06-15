@@ -115,8 +115,9 @@ def main(args):
             logger = TBLogger(name=f"{dataset_name}_loss_{loss_fn}_rpr_{replace_rate}_nh_{num_hidden}_nl_{num_layers}_lr_{lr}_mp_{max_epoch}_mpf_{max_epoch_f}_wd_{weight_decay}_wdf_{weight_decay_f}_{encoder_type}_{decoder_type}")
         else:
             logger = None
-
-        model = build_model(args)
+            
+        x = graph.ndata["feat"]
+        model = build_model(args,graph,x)
         model.to(device)
         optimizer = create_optimizer(optim_type, model, lr, weight_decay)
 
@@ -127,7 +128,7 @@ def main(args):
         else:
             scheduler = None
             
-        x = graph.ndata["feat"]
+        
         
         if not load_model:
             model = pretrain(model, graph, x, optimizer, max_epoch, device, scheduler, num_classes, lr_f, weight_decay_f, max_epoch_f, linear_prob, logger)

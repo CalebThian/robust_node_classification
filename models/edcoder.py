@@ -6,6 +6,7 @@ import torch.nn as nn
 from functools import partial
 
 from .gat import GAT
+from .GCN import GCN
 
 from .loss_func import sce_loss
 
@@ -77,8 +78,9 @@ class PreModel(nn.Module):
             momentum: float = 0.996,
             replace_rate: float = 0.0,
             zero_init: bool = False,
+            graph = None,
+            x = None,
             # need to add graph information for edge predictor construction
-            arg
          ):
         super(PreModel, self).__init__()
         self._mask_rate = mask_rate
@@ -113,18 +115,26 @@ class PreModel(nn.Module):
         dec_num_hidden = num_hidden // nhead if decoder_type in ("gat",) else num_hidden 
 
         # edge predictor
-        self.args = args
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        if args.estimator=='MLP':
-            estimator = nn.Sequential(nn.Linear(enc_num_hidden,args.mlp_hidden),
-                                    nn.ReLU(),
-                                    nn.Linear(args.mlp_hidden,args.mlp_hidden))
-        else:
-            estimator = GCN(enc_num_hidden, args.mlp_hidden, args.mlp_hidden,dropout=0.0,device=device)
-        
-        
-        ## Stop here, here should consider whether need input or not?
-        self.estimator = EstimateAdj(estimator, args, device=self.device).to(self.device)
+        if graph != None and x != None:
+            self.args = args
+            self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+            self.model = GCN(nfeat=enc_num_hidden,
+                nhid=args.hidden,
+                nclass=graph.ndata['labels'].max().item() + 1,
+                self_loop=True,
+                dropout=args.dropout, device=device).to(device)
+
+            if args.estimator=='MLP':
+                estimator = nn.Sequential(nn.Linear(enc_num_hidden,args.mlp_hidden),
+                                        nn.ReLU(),
+                                        nn.Linear(args.mlp_hidden,args.mlp_hidden))
+            else:
+                estimator = GCN(enc_num_hidden, args.mlp_hidden, args.mlp_hidden,dropout=0.0,device=device)
+            self.estimator = EstimateAdj(estimator, args, device=self.device).to(self.device)
+
+            self.optimizer_adj = optim.Adam(self.estimator.parameters(),lr=args.lr_adj, weight_decay=args.weight_decay)
+        ##
         
         # build encoder
         self.encoder = setup_module(
@@ -440,7 +450,10 @@ class PreModel(nn.Module):
                         'loss_val: {:.4f}'.format(loss_val.item()),
                         'acc_val: {:.4f}'.format(acc_val.item()),
                         'time: {:.4f}s'.format(time.time() - t))
-     # ---- End: Edge Predictor Training ----
+                
+        if args.debug:
+            print("\n=== end train_adj ===")
+    # ---- End: Edge Predictor Training ----
     
     def ema_update(self):
         def update(student, teacher):
