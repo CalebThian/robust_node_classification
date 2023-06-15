@@ -30,6 +30,7 @@ def pretrain(model, graph, feat, optimizer, max_epoch, device, scheduler, num_cl
     x = feat.to(device)
 
     target_nodes = torch.arange(x.shape[0], device=x.device, dtype=torch.long)
+    '''
     epoch_iter = tqdm(range(max_epoch))
 
     for epoch in epoch_iter:
@@ -51,7 +52,8 @@ def pretrain(model, graph, feat, optimizer, max_epoch, device, scheduler, num_cl
 
         if (epoch + 1) % 200 == 0:
             linear_probing_full_batch(model, graph, x, num_classes, lr_f, weight_decay_f, max_epoch_f, device, linear_prob, mute=True)
-
+    '''
+    model.fit(...)
     return model
 
 

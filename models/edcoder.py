@@ -254,12 +254,14 @@ class PreModel(nn.Module):
         use_g = drop_g1 if drop_g1 is not None else g
 
         enc_rep = self.encoder(use_g, use_x,)
+        
         # Embeddings
         # ---- Begin: Link Prediction ----
         for i in range(int(args.outer_steps)):
                 self.train_adj(epoch, enc_rep, edge_index, labels,
                         idx_train, idx_val)
         # ---- End: Link Prediction ----
+        
         with torch.no_grad():
             drop_g2 = drop_g2 if drop_g2 is not None else g
             latent_target = self.encoder_ema(drop_g2, x,)
@@ -307,6 +309,66 @@ class PreModel(nn.Module):
         return loss
 
     # ---- Begin: Edge Predictor Training ----
+     def fit(self, features, adj, labels, idx_train, idx_val):
+        """Train GraphMAE2 with Link Predictor.
+
+        Parameters
+        ----------
+        features :
+            node features
+        adj :
+            the adjacency matrix. The format could be torch.tensor or scipy matrix
+        labels :
+            node labels
+        idx_train :
+            node training indices
+        idx_val :
+            node validation indices
+        """
+        args = self.args
+        edge_index, _ = utils.from_scipy_sparse_matrix(adj)
+        edge_index = edge_index.to(self.device)
+
+        if sp.issparse(features):
+            features = sparse_mx_to_torch_sparse_tensor(features).to_dense().float()
+        else:
+            features = torch.FloatTensor(np.array(features))
+        features = features.to(self.device)
+        labels = torch.LongTensor(np.array(labels)).to(self.device)
+
+        self.features = features
+        self.labels = labels
+
+
+        self.estimator = EstimateAdj(edge_index, features, args, device=self.device).to(self.device)
+
+        self.optimizer = optim.Adam(self.model.parameters(),
+                               lr=args.lr, weight_decay=args.weight_decay)
+        self.optimizer_adj = optim.Adam(self.estimator.parameters(),
+                               lr=args.lr_adj, weight_decay=args.weight_decay)
+
+        # Train model
+        t_total = time.time()
+        for epoch in range(args.epochs):
+            for i in range(int(args.outer_steps)):
+                self.train_adj(epoch, features, edge_index, labels,
+                        idx_train, idx_val)
+
+            for i in range(int(args.inner_steps)):
+                self.train_gcn(epoch, features, edge_index,
+                        labels, idx_train, idx_val)
+
+        print("Optimization Finished!")
+        print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
+
+        # Testing
+        print("picking the best model according to validation performance")
+        self.model.load_state_dict(self.weights)
+
+        print("=====validation set accuracy=======")
+        self.test(idx_val)
+        print("===================================")
+    
     def train_adj(self, epoch, features, edge_index, labels, idx_train, idx_val):
         args = self.args
         if args.debug:
