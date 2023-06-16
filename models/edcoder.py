@@ -334,7 +334,7 @@ class PreModel(nn.Module):
         return loss
 
     # ---- Begin: Edge Predictor Training ----
-     def fit(self, features, adj, labels, idx_train, idx_val):
+    def fit(self, features, adj, labels, idx_train, idx_val):
         """Train GraphMAE2 with Link Predictor.
 
         Parameters
