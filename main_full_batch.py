@@ -36,7 +36,7 @@ def pretrain(model, graph, feat, optimizer, max_epoch, device, scheduler, num_cl
     for epoch in epoch_iter:
         model.train()
 
-        loss = model(graph, x, targets=target_nodes)
+        loss = model(graph, x, targets=target_nodes, epoch_link_predictor = args.outer_steps)
 
         loss_dict = {"loss": loss.item()}
         optimizer.zero_grad()

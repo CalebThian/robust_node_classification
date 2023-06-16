@@ -156,6 +156,8 @@ def build_args():
                     choices=['MLP','GCN'])
     parser.add_argument('--mlp_hidden', type=int, default=64,
                     help='Number of hidden units of MLP graph constructor')
+    parser.add_argument('--dropout', type=float, default=0.5,
+                    help='Dropout rate (1 - keep probability).')
     parser.add_argument('--alpha', type=float, default=0.01, 
                     help='weight of rec loss')
     parser.add_argument('--sigma', type=float, default=100, 

@@ -11,7 +11,7 @@ from .GCN import GCN
 from .loss_func import sce_loss
 
 import torch_geometric.utils as utils
-
+import torch.optim as optim
 
 def setup_module(m_type, enc_dec, in_dim, num_hidden, out_dim, num_layers, dropout, activation, residual, norm, nhead, nhead_out, attn_drop, negative_slope=0.2, concat_out=True, **kwargs) -> nn.Module:
     if m_type in ("gat", "tsgat"):
@@ -121,9 +121,9 @@ class PreModel(nn.Module):
 
             self.model = GCN(nfeat=enc_num_hidden,
                 nhid=args.hidden,
-                nclass=graph.ndata['labels'].max().item() + 1,
+                nclass=graph.ndata['label'].max().item() + 1,
                 self_loop=True,
-                dropout=args.dropout, device=device).to(device)
+                dropout=args.dropout, device=self.device).to(self.device)
 
             if args.estimator=='MLP':
                 estimator = nn.Sequential(nn.Linear(enc_num_hidden,args.mlp_hidden),
@@ -256,12 +256,12 @@ class PreModel(nn.Module):
             raise NotImplementedError
         return criterion
 
-    def forward(self, g, x, targets=None, epoch=0, drop_g1=None, drop_g2=None):        # ---- attribute reconstruction ----
-        loss = self.mask_attr_prediction(g, x, targets, epoch, drop_g1, drop_g2)
+    def forward(self, g, x, targets=None, epoch=0, epoch_link_predictor=1, drop_g1=None, drop_g2=None):        # ---- attribute reconstruction ----
+        loss = self.mask_attr_prediction(g, x, targets, epoch, epoch_link_predictor, drop_g1, drop_g2)
 
         return loss
 
-    def mask_attr_prediction(self, g, x, targets, epoch, drop_g1=None, drop_g2=None):
+    def mask_attr_prediction(self, g, x, targets, epoch, epoch_link_predictor = 1, drop_g1=None, drop_g2=None):
         pre_use_g, use_x, (mask_nodes, keep_nodes) = self.encoding_mask_noise(g, x, self._mask_rate)
         use_g = drop_g1 if drop_g1 is not None else g
 
@@ -269,7 +269,7 @@ class PreModel(nn.Module):
         
         # Embeddings
         # ---- Begin: Link Prediction ----
-        for i in range(int(args.outer_steps)):
+        for i in range(int(epoch_link_predictor)):
                 # train_adj(self, epoch, features, edge_index, labels, idx_train, idx_val)
                 ## epoch: i
                 ## features: enc_rep
