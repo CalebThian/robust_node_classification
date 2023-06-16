@@ -408,7 +408,7 @@ class PreModel(nn.Module):
         enc_rep = self.encoder(g, features,)
         with torch.no_grad():
             latent_target = self.encoder_ema(g, features,)
-            output = self.projector_ema(latent_target[keep_nodes])
+            latent_target = self.projector_ema(latent_target[keep_nodes])
             
             latent_pred = self.projector(enc_rep[keep_nodes])
             latent_pred = self.predictor(latent_pred)
@@ -421,10 +421,10 @@ class PreModel(nn.Module):
         ## Stop here
         loss_label_smooth = self.label_smoothing(self.estimator.poten_edge_index,\
                                                  self.estimator.estimated_weights.detach(),\
-                                                 output, idx_train, self.args.threshold)
+                                                 latent_pred, idx_train, self.args.threshold)
 
 
-        total_loss = loss_gcn + args.alpha *rec_loss
+        total_loss = loss_latent + args.alpha *rec_loss + loss_label_smooth
 
 
         total_loss.backward()
@@ -434,11 +434,20 @@ class PreModel(nn.Module):
 
         # Evaluate validation set performance separately,
         # deactivates dropout during validation run.
-        self.model.eval()
-        output = self.model(features, self.estimator.poten_edge_index, self.estimator.estimated_weights.detach())
-
-        loss_val = F.cross_entropy(output[idx_val], labels[idx_val])
-        acc_val = accuracy(output[idx_val], labels[idx_val])
+        #self.model.eval()
+        #output = self.model(features, self.estimator.poten_edge_index, self.estimator.estimated_weights.detach())
+        with torch.no_grad():
+            latent_target = self.encoder_ema(g, features,)
+            latent_target = self.projector_ema(latent_target[idx_val])
+            
+            latent_pred = self.projector(enc_rep[idx_val])
+            latent_pred = self.predictor(latent_pred)
+            
+            loss_val_latent = sce_loss(latent_pred, latent_target, 1)
+            acc_val = accuracy(latent_pred, latent_target)
+        
+        #loss_val = F.cross_entropy(output[idx_val], labels[idx_val])
+        #acc_val = accuracy(output[idx_val], labels[idx_val])
         
 
         if acc_val > self.best_val_acc:
@@ -452,13 +461,13 @@ class PreModel(nn.Module):
         if args.debug:
             if epoch % 1 == 0:
                 print('Epoch: {:04d}'.format(epoch+1),
-                      'loss_gcn: {:.4f}'.format(loss_gcn.item()),
+                      'loss_latent: {:.4f}'.format(loss_latent.item()),
                       'rec_loss: {:.4f}'.format(rec_loss.item()),
                       'loss_label_smooth: {:.4f}'.format(loss_label_smooth.item()),
                       'loss_total: {:.4f}'.format(total_loss.item()))
                 print('Epoch: {:04d}'.format(epoch+1),
                         'acc_train: {:.4f}'.format(acc_train.item()),
-                        'loss_val: {:.4f}'.format(loss_val.item()),
+                        'loss_val: {:.4f}'.format(loss_val_latent.item()),
                         'acc_val: {:.4f}'.format(acc_val.item()),
                         'time: {:.4f}s'.format(time.time() - t))
                 
