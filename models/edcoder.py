@@ -9,9 +9,15 @@ from .gat import GAT
 from .GCN import GCN
 
 from .loss_func import sce_loss
+from utils import accuracy
 
 import torch_geometric.utils as utils
 import torch.optim as optim
+
+import time
+import torch.nn.functional as F
+from copy import deepcopy
+import dgl
 
 def setup_module(m_type, enc_dec, in_dim, num_hidden, out_dim, num_layers, dropout, activation, residual, norm, nhead, nhead_out, attn_drop, negative_slope=0.2, concat_out=True, **kwargs) -> nn.Module:
     if m_type in ("gat", "tsgat"):
@@ -101,7 +107,9 @@ class PreModel(nn.Module):
 
         self._token_rate = 1 - self._replace_rate
         self._lam = lam
-
+        
+        self.best_val_loss_latent = float('-inf')
+        
         assert num_hidden % nhead == 0
         assert num_hidden % nhead_out == 0
         if encoder_type in ("gat",):
@@ -118,21 +126,13 @@ class PreModel(nn.Module):
         if graph != None and x != None:
             self.args = args
             self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-            self.model = GCN(nfeat=enc_num_hidden,
-                nhid=args.hidden,
-                nclass=graph.ndata['label'].max().item() + 1,
-                self_loop=True,
-                dropout=args.dropout, device=self.device).to(self.device)
-
             if args.estimator=='MLP':
-                estimator = nn.Sequential(nn.Linear(enc_num_hidden,args.mlp_hidden),
+                estimator = nn.Sequential(nn.Linear(num_hidden,args.mlp_hidden),
                                         nn.ReLU(),
                                         nn.Linear(args.mlp_hidden,args.mlp_hidden))
             else:
-                estimator = GCN(enc_num_hidden, args.mlp_hidden, args.mlp_hidden,dropout=0.0,device=device)
+                estimator = GCN(num_hidden, args.mlp_hidden, args.mlp_hidden,dropout=0.0,device=device)
             self.estimator = EstimateAdj(estimator, args, device=self.device).to(self.device)
-
             self.optimizer_adj = optim.Adam(self.estimator.parameters(),lr=args.lr_adj, weight_decay=args.weight_decay)
         ##
         
@@ -256,7 +256,8 @@ class PreModel(nn.Module):
             raise NotImplementedError
         return criterion
 
-    def forward(self, g, x, targets=None, epoch=0, epoch_link_predictor=1, drop_g1=None, drop_g2=None):        # ---- attribute reconstruction ----
+    def forward(self, g, x, targets=None, epoch=0, epoch_link_predictor=1, drop_g1=None, drop_g2=None):        
+        # ---- attribute reconstruction ----
         loss = self.mask_attr_prediction(g, x, targets, epoch, epoch_link_predictor, drop_g1, drop_g2)
 
         return loss
@@ -264,31 +265,31 @@ class PreModel(nn.Module):
     def mask_attr_prediction(self, g, x, targets, epoch, epoch_link_predictor = 1, drop_g1=None, drop_g2=None):
         pre_use_g, use_x, (mask_nodes, keep_nodes) = self.encoding_mask_noise(g, x, self._mask_rate)
         use_g = drop_g1 if drop_g1 is not None else g
-
-        enc_rep = self.encoder(use_g, use_x,)
+        
+        
         
         # Embeddings
         # ---- Begin: Link Prediction ----
+        edge_index = use_g.edges()
+        edge_index = torch.stack((edge_index[0],edge_index[1]))
+        labels = g.ndata['train_mask'].cpu().numpy()
+        idx_train = g.ndata['train_mask'].cpu().numpy()
+        idx_val = g.ndata['val_mask'].cpu().numpy()
         for i in range(int(epoch_link_predictor)):
-                # train_adj(self, epoch, features, edge_index, labels, idx_train, idx_val)
-                ## epoch: i
-                ## features: enc_rep
-                ## edge_index: edge_index, _ = utils.from_scipy_sparse_matrix(adj)
-                ###            edge_index = edge_index.to(self.device)
-                ## labels:  graph.ndata['label']
-                ## idx_train: graph.ndata['train_mask'].numpy()
-                ## idx_val: graph.ndata['val_mask'].numpy()
-                adj = utils.from_scipy_sparse_matrix(pre_use_g.adj(scipy_fmt='coo', etype='develops'))
-                edge_index, _ = utils.from_scipy_sparse_matrix(adj)
-                edge_index = edge_index.to(self.device)
-                labels = graph.ndata['train_mask'].numpy()
-                idx_train = graph.ndata['train_mask'].numpy()
-                idx_val = graph.ndata['val_mask'].numpy()
-                self.train_adj(i, enc_rep, edge_index, labels, idx_train, idx_val, g, keep_nodes) 
+            # train_adj(self, epoch, features, edge_index, labels, idx_train, idx_val)
+            ## epoch: i
+            ## features: enc_rep
+            ## edge_index: edge_index, _ = utils.from_scipy_sparse_matrix(adj)
+            ###            edge_index = edge_index.to(self.device)
+            ## labels:  graph.ndata['label']
+            ## idx_train: graph.ndata['train_mask'].numpy()
+            ## idx_val: graph.ndata['val_mask'].numpy()
+            self.train_adj(i, use_x, edge_index, labels, idx_train, idx_val, use_g, keep_nodes) 
         # ---- End: Link Prediction ----
-        
+        mod_g = self.edge2graph()
+        enc_rep = self.encoder(mod_g, use_x,)
         with torch.no_grad():
-            drop_g2 = drop_g2 if drop_g2 is not None else g
+            drop_g2 = mod_g#drop_g2 if drop_g2 is not None else g
             latent_target = self.encoder_ema(drop_g2, x,)
             if targets is not None:
                 latent_target = self.projector_ema(latent_target[targets])
@@ -334,87 +335,28 @@ class PreModel(nn.Module):
         return loss
 
     # ---- Begin: Edge Predictor Training ----
-    def fit(self, features, adj, labels, idx_train, idx_val):
-        """Train GraphMAE2 with Link Predictor.
-
-        Parameters
-        ----------
-        features :
-            node features
-        adj :
-            the adjacency matrix. The format could be torch.tensor or scipy matrix
-        labels :
-            node labels
-        idx_train :
-            node training indices
-        idx_val :
-            node validation indices
-        """
-        args = self.args
-        edge_index, _ = utils.from_scipy_sparse_matrix(adj)
-        edge_index = edge_index.to(self.device)
-
-        if sp.issparse(features):
-            features = sparse_mx_to_torch_sparse_tensor(features).to_dense().float()
-        else:
-            features = torch.FloatTensor(np.array(features))
-        features = features.to(self.device)
-        labels = torch.LongTensor(np.array(labels)).to(self.device)
-
-        self.features = features
-        self.labels = labels
-
-
-        self.estimator = EstimateAdj(edge_index, features, args, device=self.device).to(self.device)
-
-        self.optimizer = optim.Adam(self.model.parameters(),
-                               lr=args.lr, weight_decay=args.weight_decay)
-        self.optimizer_adj = optim.Adam(self.estimator.parameters(),
-                               lr=args.lr_adj, weight_decay=args.weight_decay)
-
-        # Train model
-        t_total = time.time()
-        for epoch in range(args.epochs):
-            for i in range(int(args.outer_steps)):
-                self.train_adj(epoch, features, edge_index, labels,
-                        idx_train, idx_val)
-
-            for i in range(int(args.inner_steps)):
-                self.train_gcn(epoch, features, edge_index,
-                        labels, idx_train, idx_val)
-
-        print("Optimization Finished!")
-        print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
-
-        # Testing
-        print("picking the best model according to validation performance")
-        self.model.load_state_dict(self.weights)
-
-        print("=====validation set accuracy=======")
-        self.test(idx_val)
-        print("===================================")
-    
     def train_adj(self, epoch, features, edge_index, labels, idx_train, idx_val, g, keep_nodes):
         args = self.args
         if args.debug:
             print("\n=== train_adj ===")
         t = time.time()
-
+        self.estimator.train()
         self.optimizer_adj.zero_grad()
 
-        rec_loss = self.estimator(edge_index, features)
+        
 
         #output = self.model(features, self.estimator.poten_edge_index, self.estimator.estimated_weights)
-        enc_rep = self.encoder(g, features,)
         with torch.no_grad():
-            latent_target = self.encoder_ema(g, features,)
-            latent_target = self.projector_ema(latent_target[keep_nodes])
+            enc_rep = self.encoder(g, features,)
+        rec_loss = self.estimator(edge_index, enc_rep)
+        mod_g = self.edge2graph()
+        with torch.no_grad():
+            latent_target = self.encoder_ema(mod_g, features,)
+            latent_target = self.projector_ema(latent_target)
             
-            latent_pred = self.projector(enc_rep[keep_nodes])
+            latent_pred = self.projector(enc_rep)
             latent_pred = self.predictor(latent_pred)
-            
             loss_latent = sce_loss(latent_pred, latent_target, 1)
-            acc_train = accuracy(latent_pred, latent_target)
             #loss_gcn = F.cross_entropy(output, labels[idx_train])
             #acc_train = accuracy(output, labels[idx_train])
         
@@ -434,28 +376,28 @@ class PreModel(nn.Module):
 
         # Evaluate validation set performance separately,
         # deactivates dropout during validation run.
-        #self.model.eval()
+        self.estimator.eval()
+        mod_g = self.edge2graph()
         #output = self.model(features, self.estimator.poten_edge_index, self.estimator.estimated_weights.detach())
         with torch.no_grad():
-            latent_target = self.encoder_ema(g, features,)
+            latent_target = self.encoder_ema(mod_g, features,)
             latent_target = self.projector_ema(latent_target[idx_val])
             
             latent_pred = self.projector(enc_rep[idx_val])
             latent_pred = self.predictor(latent_pred)
             
             loss_val_latent = sce_loss(latent_pred, latent_target, 1)
-            acc_val = accuracy(latent_pred, latent_target)
         
         #loss_val = F.cross_entropy(output[idx_val], labels[idx_val])
         #acc_val = accuracy(output[idx_val], labels[idx_val])
         
 
-        if acc_val > self.best_val_acc:
-            self.best_val_acc = acc_val
-            self.best_graph = self.estimator.estimated_weights.detach()
-            self.weights = deepcopy(self.model.state_dict())
+        if loss_val_latent > self.best_val_loss_latent:
+            self.best_val_loss_latent = loss_val_latent
+            #self.best_graph = self.estimator.estimated_weights.detach()
+            #self.weights = deepcopy(self.model.state_dict())
             if args.debug:
-                print('\t=== saving current graph/gcn, best_val_acc: %s' % self.best_val_acc.item())
+                print('\t=== saving current graph/gcn, best_val_loss_latent: %s' % self.best_val_loss_latent.item())
 
 
         if args.debug:
@@ -466,13 +408,12 @@ class PreModel(nn.Module):
                       'loss_label_smooth: {:.4f}'.format(loss_label_smooth.item()),
                       'loss_total: {:.4f}'.format(total_loss.item()))
                 print('Epoch: {:04d}'.format(epoch+1),
-                        'acc_train: {:.4f}'.format(acc_train.item()),
                         'loss_val: {:.4f}'.format(loss_val_latent.item()),
-                        'acc_val: {:.4f}'.format(acc_val.item()),
                         'time: {:.4f}s'.format(time.time() - t))
                 
         if args.debug:
             print("\n=== end train_adj ===")
+        return total_loss
             
     def label_smoothing(self, edge_index, edge_weight, representations, idx_train, threshold):
 
@@ -580,6 +521,15 @@ class PreModel(nn.Module):
         rep[masked_nodes] = 0
         return rep
     
+    def edge2graph(self):
+        g = dgl.graph((self.estimator.poten_edge_index[0],self.estimator.poten_edge_index[1]),device = self.device)
+        g.edata['w'] = self.estimator.estimated_weights
+        transform = dgl.RemoveSelfLoop()
+        new_g = transform(g)
+        #print(self.estimator.poten_edge_index)
+        #print(self.estimator.estimated_weights.detach())
+        return new_g
+    
 class EstimateAdj(nn.Module):
     """Provide a pytorch parameter matrix for estimated
     adjacency matrix and corresponding operations.
@@ -624,7 +574,7 @@ class EstimateAdj(nn.Module):
     
 
     def forward(self, edge_index, features):
-        self.poten_edge_index = self.get_poten_edge(edge_index,features,args.n_p)
+        self.poten_edge_index = self.get_poten_edge(edge_index,features,self.args.n_p)
         self.features_diff = torch.cdist(features,features,2)
         
         if self.args.estimator=='MLP':

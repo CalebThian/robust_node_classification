@@ -150,6 +150,8 @@ def build_args():
                         choices=['uniform','pair','none'], help='type of noises')
     
     # Train edge predictor
+    parser.add_argument('--debug', action='store_true',
+                        default=False, help='debug mode')
     parser.add_argument('--hidden', type=int, default=16,
                     help='Number of hidden units.')
     parser.add_argument('--estimator', type=str, default='MLP',
