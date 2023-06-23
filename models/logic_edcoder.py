@@ -133,7 +133,7 @@ class PreModel(nn.Module):
             else:
                 estimator = GCN(num_hidden, args.mlp_hidden, args.mlp_hidden,dropout=0.0,device=device)
             self.estimator = EstimateAdj(estimator, args, device=self.device).to(self.device)
-            #self.optimizer_adj = optim.Adam(self.estimator.parameters(),lr=args.lr_adj, weight_decay=args.weight_decay)
+            self.optimizer_adj = optim.Adam(self.estimator.parameters(),lr=args.lr_adj, weight_decay=args.weight_decay)
         ##
         
         # build encoder
@@ -267,10 +267,14 @@ class PreModel(nn.Module):
         use_g = drop_g1 if drop_g1 is not None else g
         
         
-        enc_rep = self.encoder(use_g, use_x,)
+        
         # Embeddings
         # ---- Begin: Link Prediction ----
-         
+        edge_index = use_g.edges()
+        edge_index = torch.stack((edge_index[0],edge_index[1]))
+        labels = g.ndata['train_mask'].cpu().numpy()
+        idx_train = g.ndata['train_mask'].cpu().numpy()
+        idx_val = g.ndata['val_mask'].cpu().numpy()
         for i in range(int(epoch_link_predictor)):
             # train_adj(self, epoch, features, edge_index, labels, idx_train, idx_val)
             ## epoch: i
@@ -280,17 +284,12 @@ class PreModel(nn.Module):
             ## labels:  graph.ndata['label']
             ## idx_train: graph.ndata['train_mask'].numpy()
             ## idx_val: graph.ndata['val_mask'].numpy()
-            edge_index = use_g.edges()
-            edge_index = torch.stack((edge_index[0],edge_index[1]))
-            labels = g.ndata['train_mask'].cpu().numpy()
-            idx_train = g.ndata['train_mask'].cpu().numpy()
-            idx_val = g.ndata['val_mask'].cpu().numpy()
             self.train_adj(i, use_x, edge_index, labels, idx_train, idx_val, use_g, keep_nodes) 
         # ---- End: Link Prediction ----
-        #mod_g = self.edge2graph()
-        
+        mod_g = self.edge2graph()
+        enc_rep = self.encoder(mod_g, use_x,)
         with torch.no_grad():
-            drop_g2 = drop_g2 if drop_g2 is not None else g
+            drop_g2 = mod_g#drop_g2 if drop_g2 is not None else g
             latent_target = self.encoder_ema(drop_g2, x,)
             if targets is not None:
                 latent_target = self.projector_ema(latent_target[targets])
@@ -341,18 +340,18 @@ class PreModel(nn.Module):
         if args.debug:
             print("\n=== train_adj ===")
         t = time.time()
-        #self.estimator.train()
-        #self.optimizer_adj.zero_grad()
+        self.estimator.train()
+        self.optimizer_adj.zero_grad()
 
         
 
         #output = self.model(features, self.estimator.poten_edge_index, self.estimator.estimated_weights)
-        #with torch.no_grad():
-        enc_rep = self.encoder(g, features,)
-        rec_loss = self.estimator(edge_index, enc_rep)
-        #mod_g = self.edge2graph()
         with torch.no_grad():
-            latent_target = self.encoder_ema(g, features,)
+            enc_rep = self.encoder(g, features,)
+        rec_loss = self.estimator(edge_index, enc_rep)
+        mod_g = self.edge2graph()
+        with torch.no_grad():
+            latent_target = self.encoder_ema(mod_g, features,)
             latent_target = self.projector_ema(latent_target)
             
             latent_pred = self.projector(enc_rep)
@@ -370,18 +369,18 @@ class PreModel(nn.Module):
         total_loss = loss_latent + args.alpha *rec_loss + loss_label_smooth
 
 
-        #total_loss.backward()
+        total_loss.backward()
 
-        #self.optimizer_adj.step()
+        self.optimizer_adj.step()
 
 
         # Evaluate validation set performance separately,
         # deactivates dropout during validation run.
         self.estimator.eval()
-        #mod_g = self.edge2graph()
+        mod_g = self.edge2graph()
         #output = self.model(features, self.estimator.poten_edge_index, self.estimator.estimated_weights.detach())
         with torch.no_grad():
-            latent_target = self.encoder_ema(g, features,)
+            latent_target = self.encoder_ema(mod_g, features,)
             latent_target = self.projector_ema(latent_target[idx_val])
             
             latent_pred = self.projector(enc_rep[idx_val])

@@ -1,0 +1,6 @@
+If you want to run the code, use the example below:
+python main_full_batch.py --dataset cora --encoder gat --decoder gat --seed 0 --device 0 --noise pair --attack none --ptb_rate 0.2
+
+
+Available noise:[uniform,pair,none]
+Available attack:[random, meta,nettack,none]
